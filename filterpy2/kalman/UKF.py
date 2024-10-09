@@ -21,18 +21,22 @@ from __future__ import absolute_import, division
 from copy import deepcopy
 from math import log, exp, sqrt
 import sys
+from typing import Any, Callable, Tuple
 import numpy as np
-from numpy import eye, zeros, dot, isscalar, outer
+import numpy.typing as npt
 from scipy.linalg import cholesky
 from filterpy2.kalman import unscented_transform
+from filterpy2.kalman.unscented_transform import UTArgs
+from filterpy2.kalman.sigma_points import JulierSigmaPoints, MerweScaledSigmaPoints
 from filterpy2.stats import logpdf
 from filterpy2.common import pretty_str
+from numpy import float64
 
 
 class UnscentedKalmanFilter:
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=invalid-name
-    r"""
+    """
     Implements the Scaled Unscented Kalman filter (UKF) as defined by
     Simon Julier in [1], using the formulation provided by Wan and Merle
     in [2]. This filter scales the sigma points to avoid strong nonlinearities.
@@ -102,7 +106,7 @@ class UnscentedKalmanFilter:
         .. code-block:: Python
 
             def state_mean(sigmas, Wm):
-                x = np.zeros(3)
+                x = np.np.zeros(3)
                 sum_sin, sum_cos = 0., 0.
 
                 for i in range(len(sigmas)):
@@ -217,7 +221,7 @@ class UnscentedKalmanFilter:
     >>>                   [0, 1, 0, 0],
     >>>                   [0, 0, 1, dt],
     >>>                   [0, 0, 0, 1]], dtype=float)
-    >>>     return np.dot(F, x)
+    >>>     return np.np.dot(F, x)
     >>>
     >>> def hx(x):
     >>>    # measurement function - convert state into a measurement
@@ -283,18 +287,18 @@ class UnscentedKalmanFilter:
 
     def __init__(
         self,
-        dim_x,
-        dim_z,
-        dt,
-        hx,
-        fx,
-        points,
-        sqrt_fn=None,
-        x_mean_fn=None,
-        z_mean_fn=None,
-        residual_x=None,
-        residual_z=None,
-        state_add=None,
+        dim_x: int,
+        dim_z: int,
+        dt: float,
+        hx: Callable[[npt.NDArray], npt.NDArray],
+        fx: Callable[[npt.NDArray, float], npt.NDArray],
+        points: MerweScaledSigmaPoints | JulierSigmaPoints,
+        sqrt_fn: Callable[[npt.NDArray], npt.NDArray] = cholesky,
+        x_mean_fn: Callable[[npt.NDArray, npt.NDArray], npt.NDArray] = np.subtract,
+        z_mean_fn: Callable[[npt.NDArray, npt.NDArray], npt.NDArray] = np.subtract,
+        residual_x: Callable[[npt.NDArray, npt.NDArray], npt.NDArray] = np.subtract,
+        residual_z: Callable[[npt.NDArray, npt.NDArray], npt.NDArray] = np.subtract,
+        state_add: Callable[[npt.NDArray, npt.NDArray], npt.NDArray] = np.add,
     ):
         """
         Create a Kalman filter. You are responsible for setting the
@@ -305,12 +309,12 @@ class UnscentedKalmanFilter:
 
         # pylint: disable=too-many-arguments
 
-        self.x = zeros(dim_x)
-        self.P = eye(dim_x)
+        self.x = np.zeros(dim_x)
+        self.P = np.eye(dim_x)
         self.x_prior = np.copy(self.x)
         self.P_prior = np.copy(self.P)
-        self.Q = eye(dim_x)
-        self.R = eye(dim_z)
+        self.Q = np.eye(dim_x)
+        self.R = np.eye(dim_z)
         self._dim_x = dim_x
         self._dim_z = dim_z
         self.points_fn = points
@@ -334,26 +338,15 @@ class UnscentedKalmanFilter:
         # weights for the means and covariances.
         self.Wm, self.Wc = points.Wm, points.Wc
 
-        if residual_x is None:
-            self.residual_x = np.subtract
-        else:
-            self.residual_x = residual_x
-
-        if residual_z is None:
-            self.residual_z = np.subtract
-        else:
-            self.residual_z = residual_z
-
-        if state_add is None:
-            self.state_add = np.add
-        else:
-            self.state_add = state_add
+        self.residual_x = residual_x
+        self.residual_z = residual_z
+        self.state_add = state_add
 
         # sigma points transformed through f(x) and h(x)
         # variables for efficiency so we don't recreate every update
 
-        self.sigmas_f = zeros((self._num_sigmas, self._dim_x))
-        self.sigmas_h = zeros((self._num_sigmas, self._dim_z))
+        self.sigmas_f = np.zeros((self._num_sigmas, self._dim_x))
+        self.sigmas_h = np.zeros((self._num_sigmas, self._dim_z))
 
         self.K = np.zeros((dim_x, dim_z))  # Kalman gain
         self.y = np.zeros((dim_z))  # residual
@@ -421,7 +414,14 @@ class UnscentedKalmanFilter:
         self.x_prior = np.copy(self.x)
         self.P_prior = np.copy(self.P)
 
-    def update(self, z, R=None, UT=None, hx=None, **hx_args):
+    def update(
+        self,
+        z: npt.NDArray | None,
+        R: npt.NDArray[float64] | None = None,
+        UT: UTArgs = unscented_transform,
+        hx: Callable[[npt.NDArray], npt.NDArray] | None = None,
+        **hx_args
+    ):
         """
         Update the UKF with the given measurements. On return,
         self.x and self.P contain the new mean and covariance of the filter.
@@ -464,8 +464,8 @@ class UnscentedKalmanFilter:
 
         if R is None:
             R = self.R
-        elif isscalar(R):
-            R = np.eye(self._dim_z) * R
+        elif np.isscalar(R):
+            R = np.eye(self._dim_z, dtype=np.float64) * R
 
         # pass prior sigmas through h(x) to get measurement sigmas
         # the shape of sigmas_h will vary if the shape of z varies, so
@@ -485,12 +485,12 @@ class UnscentedKalmanFilter:
         # compute cross variance of the state and the measurements
         Pxz = self.cross_variance(self.x, zp, self.sigmas_f, self.sigmas_h)
 
-        self.K = dot(Pxz, self.SI)  # Kalman gain
+        self.K = np.dot(Pxz, self.SI)  # Kalman gain
         self.y = self.residual_z(z, zp)  # residual
 
         # update Gaussian state estimate (x, P)
-        self.x = self.state_add(self.x, dot(self.K, self.y))
-        self.P = self.P - dot(self.K, dot(self.S, self.K.T))
+        self.x = self.state_add(self.x, np.dot(self.K, self.y))
+        self.P = self.P - np.dot(self.K, np.dot(self.S, self.K.T))
 
         # save measurement and posterior state
         self.z = deepcopy(z)
@@ -507,15 +507,19 @@ class UnscentedKalmanFilter:
         Compute cross variance of the state `x` and measurement `z`.
         """
 
-        Pxz = zeros((sigmas_f.shape[1], sigmas_h.shape[1]))
+        Pxz = np.zeros((sigmas_f.shape[1], sigmas_h.shape[1]))
         N = sigmas_f.shape[0]
         for i in range(N):
             dx = self.residual_x(sigmas_f[i], x)
             dz = self.residual_z(sigmas_h[i], z)
-            Pxz += self.Wc[i] * outer(dx, dz)
+            Pxz += self.Wc[i] * np.outer(dx, dz)
         return Pxz
 
-    def compute_process_sigmas(self, dt, fx=None, **fx_args):
+    def compute_process_sigmas(
+        self,
+        dt: float,
+        fx: Callable[[npt.NDArray, float], npt.NDArray] | None = None,
+    ):
         """
         computes the values of sigmas_f. Normally a user would not call
         this, but it is useful if you need to call update more than once
@@ -531,7 +535,7 @@ class UnscentedKalmanFilter:
         sigmas = self.points_fn.sigma_points(self.x, self.P)
 
         for i, s in enumerate(sigmas):
-            self.sigmas_f[i] = fx(s, dt, **fx_args)
+            self.sigmas_f[i] = fx(s, dt)
 
     def batch_filter(self, zs, Rs=None, dts=None, UT=None, saver=None):
         """
@@ -608,7 +612,7 @@ class UnscentedKalmanFilter:
             raise TypeError("zs must be list-like")
 
         if self._dim_z == 1:
-            if not (isscalar(z) or (z.ndim == 1 and len(z) == 1)):
+            if not (np.isscalar(z) or (z.ndim == 1 and len(z) == 1)):
                 raise TypeError("zs must be a list of scalars or 1D, 1 element arrays")
         else:
             if len(z) != self._dim_z:
@@ -628,12 +632,12 @@ class UnscentedKalmanFilter:
 
         # mean estimates from Kalman Filter
         if self.x.ndim == 1:
-            means = zeros((z_n, self._dim_x))
+            means = np.zeros((z_n, self._dim_x))
         else:
-            means = zeros((z_n, self._dim_x, 1))
+            means = np.zeros((z_n, self._dim_x, 1))
 
         # state covariances from Kalman Filter
-        covariances = zeros((z_n, self._dim_x, self._dim_x))
+        covariances = np.zeros((z_n, self._dim_x, self._dim_x))
 
         for i, (z, r, dt) in enumerate(zip(zs, Rs, dts)):
             self.predict(dt=dt, UT=UT)
@@ -709,7 +713,7 @@ class UnscentedKalmanFilter:
 
         if dts is None:
             dts = [self._dt] * n
-        elif isscalar(dts):
+        elif np.isscalar(dts):
             dts = [dts] * n
 
         if Qs is None:
@@ -719,12 +723,12 @@ class UnscentedKalmanFilter:
             UT = unscented_transform
 
         # smoother gain
-        Ks = zeros((n, dim_x, dim_x))
+        Ks = np.zeros((n, dim_x, dim_x))
 
         num_sigmas = self._num_sigmas
 
         xs, ps = Xs.copy(), Ps.copy()
-        sigmas_f = zeros((num_sigmas, dim_x))
+        sigmas_f = np.zeros((num_sigmas, dim_x))
 
         for k in reversed(range(n - 1)):
             # create sigma points from state estimate, pass through state func
@@ -741,14 +745,14 @@ class UnscentedKalmanFilter:
             for i in range(num_sigmas):
                 y = self.residual_x(sigmas_f[i], xb)
                 z = self.residual_x(sigmas[i], Xs[k])
-                Pxb += self.Wc[i] * outer(z, y)
+                Pxb += self.Wc[i] * np.outer(z, y)
 
             # compute gain
-            K = dot(Pxb, self.inv(Pb))
+            K = np.dot(Pxb, self.inv(Pb))
 
             # update the smoothed estimates
-            xs[k] += dot(K, self.residual_x(xs[k + 1], xb))
-            ps[k] += dot(K, ps[k + 1] - Pb).dot(K.T)
+            xs[k] += np.dot(K, self.residual_x(xs[k + 1], xb))
+            ps[k] += np.dot(K, ps[k + 1] - Pb).dot(K.T)
             Ks[k] = K
 
         return (xs, ps, Ks)
@@ -788,7 +792,7 @@ class UnscentedKalmanFilter:
         mahalanobis : float
         """
         if self._mahalanobis is None:
-            self._mahalanobis = sqrt(float(dot(dot(self.y.T, self.SI), self.y)))
+            self._mahalanobis = sqrt(float(np.dot(np.dot(self.y.T, self.SI), self.y)))
         return self._mahalanobis
 
     def __repr__(self):

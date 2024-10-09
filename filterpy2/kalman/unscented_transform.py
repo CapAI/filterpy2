@@ -16,10 +16,31 @@ This is licensed under an MIT license. See the readme.MD file
 for more information.
 """
 
+from typing import Callable, NewType, Tuple, Type
 import numpy as np
+import numpy.typing as npt
+
+UTArgs = Callable[
+    [
+        npt.NDArray,  # sigmas
+        npt.NDArray,  # Wm
+        npt.NDArray,  # Wc
+        npt.NDArray | None,  # noise_cov
+        Callable[[npt.NDArray, npt.NDArray], npt.NDArray],  # mean_fn
+        Callable[[npt.NDArray, npt.NDArray], npt.NDArray],  # residual_fn
+    ],
+    Tuple[npt.NDArray, npt.NDArray],
+]
 
 
-def unscented_transform(sigmas, Wm, Wc, noise_cov=None, mean_fn=None, residual_fn=None):
+def unscented_transform(
+    sigmas: npt.NDArray,
+    Wm: npt.NDArray,
+    Wc: npt.NDArray,
+    noise_cov: npt.NDArray | None = None,
+    mean_fn=Callable[[npt.NDArray, npt.NDArray], npt.NDArray],
+    residual_fn=Callable[[npt.NDArray, npt.NDArray], npt.NDArray],
+) -> Tuple[npt.NDArray, npt.NDArray]:
     r"""
     Computes unscented transform of a set of sigma points and weights.
     returns the mean and covariance in a tuple.
@@ -97,15 +118,11 @@ def unscented_transform(sigmas, Wm, Wc, noise_cov=None, mean_fn=None, residual_f
 
     kmax, n = sigmas.shape
 
-    try:
-        if mean_fn is None:
-            # new mean is just the sum of the sigmas * weight
-            x = np.dot(Wm, sigmas)  # dot = \Sigma^n_1 (W[k]*Xi[k])
-        else:
-            x = mean_fn(sigmas, Wm)
-    except Exception:
-        print(sigmas)
-        raise
+    if mean_fn is None:
+        # new mean is just the sum of the sigmas * weight
+        x = np.dot(Wm, sigmas)  # dot = \Sigma^n_1 (W[k]*Xi[k])
+    else:
+        x = mean_fn(sigmas, Wm)
 
     # new covariance is the sum of the outer product of the residuals
     # times the weights
@@ -123,4 +140,4 @@ def unscented_transform(sigmas, Wm, Wc, noise_cov=None, mean_fn=None, residual_f
     if noise_cov is not None:
         P += noise_cov
 
-    return (x, P)
+    return x, P
