@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "filterpy2"
-version = "2.0.0a0"
+version = "2.0.0a1"
 description = "Filterpy refactored with types and using Poetry"
 authors = ["Rlabbe <rlabbejr@gmail.com>"]
 license = "LICENSE"
@@ -8,7 +8,7 @@ readme = "README.rst"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-numpy = "^2.1.2"
+numpy = ">1.25, <2.5"
 scipy = "^1.14.1"
 
 [tool.poetry.group.dev.dependencies]
